@@ -24,6 +24,11 @@ export default function Home() {
     if(!input.trim())
       return;
 
+    const historyForBackend = messages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+
     const userMessage: Message = { 'role': 'user', 'content': input };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
@@ -33,7 +38,10 @@ export default function Home() {
       const response = await fetch('http://localhost:8000/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMessage.content }),
+        body: JSON.stringify({ 
+          query: userMessage.content,
+          chat_history: historyForBackend 
+        }),
       });
 
       const data = await response.json();
