@@ -115,3 +115,25 @@ async def chat(request: ChatRequest):
          "answer": response["answer"],
          "sources": sources
      }
+
+class TitleRequest(BaseModel):
+    query: str
+
+@app.post('/api/title')
+async def generate_title(request: TitleRequest):
+    print("Generating Dynamic Title...")
+
+    title_prompt = PromptTemplate.from_template(
+        "You are an expert copywriter. Generate a highly concise 3 to 5 word title "
+        "for a conversation that begins with the following user prompt. "
+        "Return ONLY the title string. Do not use quotes, punctuations or conversational filler.\n\n"
+        "User Prompt: {query}"
+    )  
+
+    title_chain = title_prompt | llm
+
+    generated_title = title_chain.invoke({ "query": request.query })
+
+    clean_title = generated_title.replace('"', '').replace("'", "").strip()
+
+    return { "title": clean_title }
