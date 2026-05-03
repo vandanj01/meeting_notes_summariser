@@ -2,4 +2,3 @@ dataset/
 meeting_chroma_db/
 __pycache__/
 .venv/
-frontend/dev.db
