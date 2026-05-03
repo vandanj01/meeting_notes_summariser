@@ -3,11 +3,13 @@ from pydantic import BaseModel
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.llms import Ollama
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_classic.chains.retrieval import create_retrieval_chain
+from langchain_classic.chains import create_history_aware_retriever
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import PromptTemplate
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+from langchain_core.messages import HumanMessage, AIMessage
 
 app = FastAPI(title = "Meeting Notes Summariser API")
 
@@ -29,10 +31,29 @@ vector_db = Chroma(
 
 print("2. Connecting to local ollama (phi3)...")
 llm = Ollama(model = "phi3")
+retriever = vector_db.as_retriever(search_kwargs = {"k": 10})
 
-print("3. Building the RAG pipeline...")
+print("3. Building Conversational Memory Chains...")
 
-system_prompt = (
+contextualise_q_system_prompt = (
+    "Given a chat history and a latest user question "
+    "which might reference context in the chat history, "
+    "formulate a standalone question which can be understood "
+    "without the chat history. DO NOT answer the question, "
+    "just reformulate it if needed and otherwise return it as is."
+)
+
+contextualise_q_prompt = ChatPromptTemplate.from_messages([
+    ("system", contextualise_q_system_prompt),
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+])
+
+history_aware_retriever = create_history_aware_retriever(
+    llm, retriever, contextualise_q_prompt
+)
+
+qa_system_prompt = (
     "You are an AI meeting transcript summariser. Use the following context from meeting transcripts "
     "to answer the user's question. If you do not know the answer, say you don't know. "
     "If someone asks questions related to any other topic, politely decline to answer. "
@@ -41,8 +62,9 @@ system_prompt = (
     "Context: {context}"
 )
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", system_prompt),
+qa_prompt = ChatPromptTemplate.from_messages([
+    ("system", qa_system_prompt),
+    MessagesPlaceholder("chat_history"),
     ("human", "{input}"),
 ])
 
@@ -50,23 +72,36 @@ doc_prompt = PromptTemplate.from_template(
     "Meeting date: {date}\nTranscript Excerpt: {page_content}"
 )
 
-document_chain = create_stuff_documents_chain(
+question_answer_chain = create_stuff_documents_chain(
     llm = llm, 
-    prompt = prompt,
+    prompt = qa_prompt,
     document_prompt = doc_prompt
 )
 
-retriever = vector_db.as_retriever(search_kwargs = {"k": 10})
-rag_chain = create_retrieval_chain(retriever, document_chain)
+rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+class Message(BaseModel):
+    role: str
+    content: str
 
 class ChatRequest(BaseModel):
     query: str
+    chat_history: List[Message] = []
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-     response = rag_chain.invoke({"input": request.query})
-
-     answer = response["answer"]
+     
+     langchain_history = []
+     for msg in request.chat_history:
+         if msg.role == "user":
+             langchain_history.append(HumanMessage(content = msg.content))
+         else:
+             langchain_history.append(AIMessage(content = msg.content))
+     
+     response = rag_chain.invoke({
+         "input": request.query,
+         "chat_history": langchain_history
+         })
 
      sources = []
      for doc in response["context"]:
@@ -77,6 +112,6 @@ async def chat(request: ChatRequest):
             })
 
      return {
-         "answer": answer,
+         "answer": response["answer"],
          "sources": sources
      }
