@@ -1,13 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { saveMessage, updateSessionTitle } from '../src/app/actions/chat';
-
-interface Source {
-    date: string;
-    meeting_uid: string;
-    summary: string;
-}
+import { saveMessage, updateSessionTitle, type Source } from '../src/app/actions/chat';
 
 interface Message {
     role: 'user' | 'ai';

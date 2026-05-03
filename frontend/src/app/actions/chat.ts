@@ -12,7 +12,13 @@ export async function createChatSession() {
     return session.id;
 }
 
-export async function saveMessage(sessionId: string, role: string, content: string, sources: any = null) {
+export interface Source {
+    date: string | null;
+    meeting_uid: string | null;
+    summary: string | null;
+}
+
+export async function saveMessage(sessionId: string, role: string, content: string, sources: Source[] | null = null) {
     await prisma.message.create({
         data: {
             sessionId,
