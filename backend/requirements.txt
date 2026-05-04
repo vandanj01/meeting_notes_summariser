@@ -6,3 +6,4 @@ langchain-core
 langchain-community
 chromadb
 sentence-transformers
+multipart
