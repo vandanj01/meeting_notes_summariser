@@ -13,9 +13,7 @@ export async function createChatSession() {
 }
 
 export interface Source {
-    date: string | null;
-    meeting_uid: string | null;
-    summary: string | null;
+    title: string | null,
 }
 
 export async function saveMessage(sessionId: string, role: string, content: string, sources: Source[] | null = null) {

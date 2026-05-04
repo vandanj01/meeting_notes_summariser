@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from pydantic import BaseModel
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -10,6 +10,11 @@ from langchain_classic.chains.combine_documents import create_stuff_documents_ch
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from langchain_core.messages import HumanMessage, AIMessage
+from dotenv import load_dotenv
+import os
+import shutil
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 app = FastAPI(title = "Meeting Notes Summariser API")
 
@@ -21,17 +26,24 @@ app.add_middleware(
     allow_headers = ["*"],
 )
 
+load_dotenv()
+
+DB_DIRECTORY = os.getenv("DB_DIRECTORY", "./meeting_chroma_db")
+
 print("1. Loading Embedding Model and Vector Database...")
 
 embedding_model = HuggingFaceEmbeddings(model_name = "all-MiniLM-L6-v2")
 vector_db = Chroma(
-    persist_directory = "./meeting_chroma_db",
+    persist_directory = DB_DIRECTORY,
     embedding_function = embedding_model
 )
 
 print("2. Connecting to local ollama (phi3)...")
 llm = Ollama(model = "phi3")
-retriever = vector_db.as_retriever(search_kwargs = {"k": 10})
+retriever = vector_db.as_retriever(
+    search_type = "mmr",
+    search_kwargs = {"k": 5, "fetch_k": 20}
+)
 
 print("3. Building Conversational Memory Chains...")
 
@@ -54,8 +66,12 @@ history_aware_retriever = create_history_aware_retriever(
 )
 
 qa_system_prompt = (
-    "You are an AI meeting transcript summariser. Use the following context from meeting transcripts "
-    "to answer the user's question. If you do not know the answer, say you don't know. "
+    "You are an expert executive assistant and meeting analyst. "
+    "You are answering questions based on raw, unstructured meeting transcripts.\n"
+    "Because these are conversational transcripts, you must read between the lines, "
+    "synthesize fragmented discussions, and ignore conversational filler.\n"
+    "Use the provided context to answer the user's question comprehensively. "
+    "If the context does not contain the answer, explicitly say 'I don't have enough information in these transcripts. "
     "If someone asks questions related to any other topic, politely decline to answer. "
     "Dates in the meeting transcripts are in the format yyyy-mm-dd. "
     "Always reference the meeting dates in your response if applicable.\n\n"
@@ -68,8 +84,9 @@ qa_prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
 ])
 
-doc_prompt = PromptTemplate.from_template(
-    "Meeting date: {date}\nTranscript Excerpt: {page_content}"
+doc_prompt = PromptTemplate(
+    input_variables = ["page_content", "title"],
+    template = "Meeting: {title}\nTranscript Excerpt:\n{page_content}"
 )
 
 question_answer_chain = create_stuff_documents_chain(
@@ -106,9 +123,8 @@ async def chat(request: ChatRequest):
      sources = []
      for doc in response["context"]:
          sources.append({
-             "date": doc.metadata.get("date"),
-             "meeting_uid": doc.metadata.get("meeting_uid"),
-             "summary": doc.metadata.get("summary")
+             "title": doc.metadata.get("title", "Meeting Transcript"),
+             "content": doc.page_content[:150] + "..."
             })
 
      return {
@@ -137,3 +153,40 @@ async def generate_title(request: TitleRequest):
     clean_title = generated_title.replace('"', '').replace("'", "").strip()
 
     return { "title": clean_title }
+
+@app.post('/api/upload')
+async def upload_transcript(file: UploadFile = File(...)):
+    print(f"Receiving file: {file.filename}")
+
+    data_dir = os.getenv("DATA_DIRECTORY", "./transcripts")
+    os.makedirs(data_dir, exist_ok = True)
+    file_path = os.path.join(data_dir, file.filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    print("Processing Text...")
+    loader = TextLoader(file_path, encoding = 'utf-8')
+    documents = loader.load()
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size = 2500,
+        chunk_overlap = 500,
+        length_function = len
+    )
+
+    chunks = text_splitter.split_documents(documents)
+    clean_title = file.filename.replace('.txt', '').replace('_', ' ')
+    for chunk in chunks:
+        if not chunk.metadata:
+            chunk.metadata = {}
+        chunk.metadata['title'] = clean_title
+        chunk.metadata['type'] = 'Meeting Transcript'
+    
+    print(f"Adding {len(chunks)} chunks to the vector database...")
+    vector_db.add_documents(chunks)
+
+    return {
+        "status": "success",
+        "message": f"Successfully processed '{clean_title}' and added to the memory."
+    }

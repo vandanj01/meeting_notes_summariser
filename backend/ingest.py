@@ -1,65 +1,61 @@
-import pandas as pd
+import os
+from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
 
-def process_meeting_data(csv_path):
-    print("1. Loading CSV Data...")
-    df = pd.read_csv(csv_path).fillna("")
+load_dotenv()
+
+DATA_DIRECTORY = os.getenv("DATA_DIRECTORY", "./transcripts")
+DB_DIRECTORY = os.getenv("DB_DIRECTORY", "./meeting_chroma_db")
+
+def ingest_data():
+    print("1. Loading embedding model (this will download ~90 MB the first time)...")
+    embedding_model = HuggingFaceEmbeddings(model_name = "all-MiniLM-L6-v2")
+
+    print(f"2. Loading text transcripts from '{DATA_DIRECTORY}'...")
+    loader = DirectoryLoader('./transcripts', glob = "**/*.txt", loader_cls = TextLoader, loader_kwargs = { 'encoding': 'utf-8' })
+    documents = loader.load()
+
+    if not documents:
+        print("No text files found.")
+        return
+    
+    print(f"Loaded {len(documents)} transcript files.")
 
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size = 1000,
-        chunk_overlap = 200,
+        chunk_size = 2500,
+        chunk_overlap = 500,
         length_function = len,
     )
 
-    all_documents = []
+    print("3. Chunking transscript and attaching metadata...")
 
-    print("2. Chunking transscript and attaching metadata...")
-    for index, row in df.iterrows():
-        transcript_text = str(row['Transcript'])
+    chunks = text_splitter.split_documents(documents)
 
-        if not transcript_text.strip():
-            continue
+    for chunk in chunks:
+        file_path = chunk.metadata.get('source', '')
+        file_name = os.path.basename(file_path)
+        clean_title = file_name.replace('.txt', '').replace('_', ' ')
+        chunk.metadata['title'] = clean_title
+        chunk.metadata['type'] = 'Meeting Transcript'
 
-        metadata = {
-            "date": row['Date'],
-            "meeting_uid": row['Meeting_UID'],
-            "item_uid": row['Item_UID'],
-            "summary": row['Summary'],
-        }
+    print(f"Success! Processed {len(documents)} meetings into {len(chunks)} searchable chunks.")
 
-        chunks = text_splitter.split_text(transcript_text)
-
-        for chunk in chunks:
-            doc = Document(
-                page_content = chunk,
-                metadata = metadata
-            )
-            all_documents.append(doc)
-        
-    print(f"Success! Processed {len(df)} meeting into {len(all_documents)} searchable chunks.")
-    return all_documents
-
-def build_vector_database(documents):
-    print("3. Loading embedding model (this will download ~90 MB the first time)...")
-    embedding_model = HuggingFaceEmbeddings(model_name = "all-MiniLM-L6-v2")
-
-    db_folder = "./meeting_chroma_db"
-
-    print(f"4. Converting text to vectors and saving to {db_folder}...")
-    print(" (This may take a minute or two depending on your CSV size...)")
+    print(f"4. Converting text to vectors and saving to {DB_DIRECTORY}...")
+    print(" (This may take a minute or two depending on your dataset size...)")
 
     vector_db = Chroma.from_documents(
-        documents = documents,
+        documents = chunks,
         embedding = embedding_model,
-        persist_directory = db_folder
+        persist_directory = DB_DIRECTORY
     )
 
-    print(f"Success! Your local vector database is ready at '{db_folder}'.")
+    print(f"Success! Your local vector database is ready at '{DB_DIRECTORY}'.")
+
     return vector_db
 
 if __name__ == "__main__":
-    docs = process_meeting_data("../dataset/test_df.csv")
-    db = build_vector_database(docs)
+    ingest_data()

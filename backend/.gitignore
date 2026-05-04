@@ -1,3 +1,5 @@
 meeting_chroma_db/
 __pycache__/
 .venv/
+transcripts/
+.env

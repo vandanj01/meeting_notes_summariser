@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { saveMessage, updateSessionTitle, type Source } from '../src/app/actions/chat';
+import FileUpload from '../components/FileUpload';
 
 interface Message {
     role: 'user' | 'ai';
@@ -18,6 +19,16 @@ export default function ChatInterface({ sessionId, initialMessages }: ChatInterf
     const [messages, setMessages] = useState<Message[]>(initialMessages);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+
+    const handleUploadComplete = (filename: string) => {
+        setMessages((prev) => [...prev, 
+            {
+                role: "ai",
+                content: `Successfully read **${filename}**`,
+                sources: [],                
+            },
+        ]);
+    };
 
     const sendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -106,7 +117,7 @@ export default function ChatInterface({ sessionId, initialMessages }: ChatInterf
                                     <div className = "mt-2 flex flex-wrap gap-2 max-w-[80%]">
                                         { msg.sources.map((source, index) => (
                                             <span key = { index } className = "text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100">
-                                                { source.date } ({ source.meeting_uid })
+                                                { source.title }
                                             </span>
                                         ))}
                                     </div>
@@ -122,6 +133,9 @@ export default function ChatInterface({ sessionId, initialMessages }: ChatInterf
                 </div>
 
                 <form onSubmit = { sendMessage } className = "flex gap-2">
+
+                    <FileUpload onUploadComplete = { handleUploadComplete } />
+
                     <input 
                         type = "text" 
                         value = { input }
