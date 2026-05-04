@@ -1,3 +1,4 @@
+langchain-ollama
 fastapi
 uvicorn
 pydantic
@@ -6,4 +7,6 @@ langchain-core
 langchain-community
 chromadb
 sentence-transformers
-multipart
+python-multipart
+langchain-huggingface
+dotenv

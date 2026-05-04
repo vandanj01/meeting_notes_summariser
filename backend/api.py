@@ -2,10 +2,10 @@ from fastapi import FastAPI, File, UploadFile
 from pydantic import BaseModel
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.llms import Ollama
+from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_classic.chains.retrieval import create_retrieval_chain
-from langchain_classic.chains import create_history_aware_retriever
+from langchain_classic.chains.history_aware_retriever import create_history_aware_retriever
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
@@ -39,7 +39,7 @@ vector_db = Chroma(
 )
 
 print("2. Connecting to local ollama (phi3)...")
-llm = Ollama(model = "phi3")
+llm = ChatOllama(model = "phi3")
 retriever = vector_db.as_retriever(
     search_type = "mmr",
     search_kwargs = {"k": 5, "fetch_k": 20}
